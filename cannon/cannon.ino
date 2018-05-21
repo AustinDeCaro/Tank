@@ -33,9 +33,8 @@ RECEIVE_DATA_STRUCTURE dataReceive;
 #define pressureSen A9
 #define proxSen A0
 
-//Motor Controller Pins
-#define LMR 13
-#define RMR 12
+#define LMR 10
+#define RMR 2
 
   // Angle constants
 const int MIN_ANGLE = 10;
@@ -56,15 +55,13 @@ bool safe;
 bool previousSafe;
 bool isNoPower;
 
-bool newdata;
-int bufferreset;
+int spinoutreset;
+int ccw;
+int cw;
 int ccwbuff;
 int cwbuff;
-int accelerator_ff;
-int ccw; //190 min  30% = 206
-int cw; // 184 min 30% = 155
-char lastcommand[4];
 
+char lastcommand[4];
 
 void setup(){
     pinMode(aFF2, INPUT);      
@@ -89,14 +86,15 @@ void setup(){
     previousSafe = true;                                              // Initialize safe flag
     set_angle = false;                                                // Initialize set_angle flag
 
-    newdata = false;                                                  //Driving Initialization
-    bufferreset = 0;
-    ccwbuff = 1870;
-    cwbuff = 1870;
-    accelerator_ff = 0;
+    spinoutreset = 0;
     ccw = 187;
     cw = 187;
-    
+    ccwbuff = 1870;
+    cwbuff = 1870;
+
+    analogWrite(LMR, 187);
+    analogWrite(RMR, 187);
+  
       // Relay initialization
     digitalWrite(fireRelay, 1);                                       // Turn off all relays except the blow off
     digitalWrite(inflatorRelay, 1);
@@ -199,38 +197,7 @@ void serialProcess(){
                     digitalWrite(blowoffRelay, 0);
                 }
                 break;
-            case 'd':
-                newdata = true;
-                      // Drive
-                if(lastcommand[1] != dataReceive.chardata[1] || lastcommand[2] != dataReceive.chardata[2]){ //decelerate
-                  cw = 187;
-                  ccw = 187;
-                  analogWrite(LMR, cw);
-                  analogWrite(RMR, ccw);
-                  cwbuff = 1870;
-                  ccwbuff = 1870;
-                  delay(400);
-                }
-                else{     //accelerate
-                  if(accelerator_ff >4){
-                    if(cwbuff > 1581){
-                      cwbuff -= 17;
-                      cw = cwbuff%10 > 0 ? cwbuff/10 + 1 : cwbuff/10;
-                    }
-                    if(ccwbuff < 2180){
-                      ccwbuff += 10;
-                      ccw = ccwbuff/10;
-                    }
-                    bufferreset = 0;
-                    accelerator_ff = 0;
-                    writetomotors(dataReceive.chardata);
-                  }
-                  else{
-                    accelerator_ff++;
-                  }
-                }
-     
-                break;
+  
               // Fire code
             case 'f':
                 if(dataReceive.chardata[1] == '3' && dataReceive.chardata[2] == '0'){
@@ -249,26 +216,59 @@ void serialProcess(){
                     armed = !armed;                                                                               // Arm and disarm the connan
                 }
                 break;
+             
+             case 'd':
+                if(lastcommand[0] != 'd'){
+                  spinoutreset = 0;
+                }
+                else if(lastcommand[1] != dataReceive.chardata[1] || lastcommand[2] != dataReceive.chardata[2]){
+                  
+                  cw = 187;
+                  ccw = 187;
+                  analogWrite(LMR, cw);
+                  analogWrite(RMR, ccw);
+                  cwbuff = 1870;
+                  ccwbuff = 1870;
+                  delay(400);
+                }
+                else{
+                  if(cwbuff > 1530){
+                    cwbuff -= 34;
+                    cw = cwbuff%10 > 0 ? cwbuff/10 + 1 : cwbuff/10;
+                  }
+                  if(ccwbuff < 2210){
+                    ccwbuff += 20;
+                    ccw = ccwbuff/10;
+                  }
+                  spinoutreset = 0;
+                  writetomotors(dataReceive.chardata);
+                }
+               
+                break;
         }
-        
+        lastcommand[0] = dataReceive.chardata[0];
+        lastcommand[1] = dataReceive.chardata[1];
+        lastcommand[2] = dataReceive.chardata[2];
+        lastcommand[3] = dataReceive.chardata[3];
     }
-     else if(lastcommand[0] == 'd'){
-               if (newdata){bufferreset++;}
-               if (bufferreset > 30000){
-                cw = 187;
-                ccw = 187;
-                analogWrite(LMR, cw);
-                analogWrite(RMR, ccw);
-                cwbuff = 1870;
-                ccwbuff = 1870;
-                bufferreset = 0;
-                newdata = false;
-               }
-     }
-     lastcommand[0] = dataReceive.chardata[0];
-     lastcommand[1] = dataReceive.chardata[1];
-     lastcommand[2] = dataReceive.chardata[2];
-     lastcommand[3] = dataReceive.chardata[3];
+    else{
+      if(lastcommand[0] = 'd'){
+        spinoutreset++;
+        if(spinoutreset > 50){
+          cw = 187;
+          ccw = 187;
+          analogWrite(LMR, cw);
+          analogWrite(RMR, ccw);
+          cwbuff = 1870;
+          ccwbuff = 1870;
+          spinoutreset = 0;
+        }
+      }
+    }
+}
+
+void spinout(){
+  
 }
 
 void writetomotors(char data[4]){
@@ -277,12 +277,12 @@ void writetomotors(char data[4]){
             analogWrite(RMR, ccw);
         }
         else if(data[1] == 'f' & data[2] == 'l'){
-           analogWrite(LMR, (ccw-187)/2 +187);
-           analogWrite(RMR, ccw);
+           analogWrite(LMR, ccw);
+           analogWrite(RMR, (ccw-187)/2 + 187);
         }
         else if(data[1] == 'f' & data[2] == 'r'){
-           analogWrite(LMR, ccw);
-           analogWrite(RMR, (ccw-187)/2+187);
+           analogWrite(LMR, (ccw-187)/2 + 187);
+           analogWrite(RMR, ccw);
         }
         else if(data[1] == 'r'){
           analogWrite(LMR, cw);
@@ -363,7 +363,6 @@ void sendCommand(String command){                                               
     ETout.sendData();
     Serial.println(dataSend.chardata);
 }
-
 
 
 

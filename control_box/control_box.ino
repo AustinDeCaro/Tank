@@ -23,13 +23,13 @@ RECEIVE_DATA_STRUCTURE dataReceive;
 #define D7  30
 #define LL  50  // LCD Backlight pin
 #define BL  51  // Button Light pin 
-#define RJU  25	// Angle up pin. Ri+ght joystick
-#define RJD  23	// Angle down pin. Right joystick
-#define LJU	 29	// Pressure up pin. Left joystick
-#define LJD	 27	// Pressure down pin. Left joystick
+#define AUP  25	// Angle up pin. Left joystick
+#define ADW  23	// Angle down pin. Left joystick
+#define PUP	 29	// Pressure up pin. Right joystick
+#define PDW	 27	// Pressure down pin. Right joystick
 #define ARM  2	// Arm/Disarm toggle switch pin
 #define FIR  3	// Fire pin. BIG RED BUTTON
-#define DRV  10 // Drive pin.
+#define DRV  10 // Drive toggle
 
 #define MAX_ANGLE 80
 #define MIN_ANGLE 10
@@ -65,13 +65,13 @@ void setup()
   digitalWrite(BL, HIGH);
   lcd.begin(20, 4);                               // 20, 4 is our lcd size
 	displayMenu();														      // Initialize the lcd to display the Menu without values
-	pinMode(LJU, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic. 
-	pinMode(LJD, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
-	pinMode(RJU, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
-	pinMode(RJD, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
+	pinMode(AUP, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic. 
+	pinMode(ADW, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
+	pinMode(PUP, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
+	pinMode(PDW, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
 	pinMode(ARM, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
 	pinMode(FIR, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
-  pinMode(DRV, INPUT_PULLUP);                     // ""                                                                                             ""
+  pinMode(DRV, INPUT_PULLUP);
 	Serial.begin(9600);
   Serial2.begin(9600);                            // Direct EasyTransfer UART
   Serial3.begin(9600);                            // BLIP RS232 UART. Currently not used. I'll leave the code for it here for now.
@@ -120,94 +120,96 @@ ISR(TIMER1_COMPA_vect)          // timer compare interrupt service routine
     arm();
   if(!safe)
     return;
-  if(!digitalRead(RJU))
+  if(!digitalRead(DRV))
   {
-    Serial.println("RJU");
-    if(angle < MAX_ANGLE)
-    {
-      angle++;
-      if(angle%1 == 0)                        //Send the command every X increases of the angle. Currently 1.
-      {
-        dataSend.chardata[0] = 'a';
-        dataSend.chardata[1] = angle/10 + 0x30;
-        dataSend.chardata[2] = angle%10 + 0x30;
-        dataSend.chardata[3] = 0;
-        ETout.sendData();
-      }
-    }
-    updateMenu();
-    joystickupheld = 1;
-  }
-  else if(joystickupheld == 1)
-  {
-    dataSend.chardata[0] = 'a';
-    dataSend.chardata[1] = angle/10 + 0x30;
-    dataSend.chardata[2] = angle%10 + 0x30;
-    dataSend.chardata[3] = 0;
-    ETout.sendData();
-    joystickupheld =0;
-  }
-  if(!digitalRead(RJD))
-  {
-    if(angle > MIN_ANGLE)
-    {
-      angle--;
-      if(angle%1 == 0)
-      {
-        dataSend.chardata[0] = 'a';
-        dataSend.chardata[1] = angle/10 + 0x30;
-        dataSend.chardata[2] = angle%10 + 0x30;
-        dataSend.chardata[3] = 0;
-        ETout.sendData();
-      }
-    }
-    updateMenu();
-    joystickdwheld = 1;
-  }
-  else if(joystickdwheld == 1)
-  {
-    dataSend.chardata[0] = 'a';
-    dataSend.chardata[1] = angle/10 + 0x30;
-    dataSend.chardata[2] = angle%10 + 0x30;
-    dataSend.chardata[3] = 0;
-    ETout.sendData();
-    joystickdwheld =0;
-  }
-  if(!digitalRead(LJU) && !puheld && digitalRead(DRV))
-  {
-    puheld = 1;
-    sendCommand("puh");
-  }
-  if(digitalRead(LJU) && puheld && digitalRead(DRV))
-  {
-    puheld = 0;
-    sendCommand("pur");
-  }
-  if(!digitalRead(LJD) && !pdheld && digitalRead(DRV))
-  {
-    pdheld = 1;
-    sendCommand("pdh");
-  }
-  if(digitalRead(LJD) && pdheld && digitalRead(DRV))
-  {
-    pdheld = 0;
-    sendCommand("pdr");
-  }
-  //Driving Code
-  if(!digitalRead(DRV)){
-     if(!digitalRead(LJU) & !digitalRead(RJU)){      //Drive Forward
+    if(!digitalRead(PUP) & !digitalRead(AUP)){      //Drive Forward
       sendCommand("dfn");
-     }
-     if(!digitalRead(LJD) & !digitalRead(RJD)){      //Drive Backward
+    }
+    if(!digitalRead(PDW) & !digitalRead(ADW)){      //Drive Backward
       sendCommand("drn");
-     }
-     if(!digitalRead(LJU) & !digitalRead(RJD)){      //Drive Right
+    }
+    if(!digitalRead(PUP) & !digitalRead(ADW)){      //Drive Right
       sendCommand("dfr");
-     }
-     if(!digitalRead(LJD) & !digitalRead(RJU)){      //Drive Left
+    }
+    if(!digitalRead(PDW) & !digitalRead(AUP)){      //Drive Left
       sendCommand("dfl");
     }
   }
+  else{
+    if(!digitalRead(AUP))
+    {
+      if(angle < MAX_ANGLE)
+      {
+        angle++;
+        if(angle%1 == 0)                        //Send the command every X increases of the angle. Currently 1.
+        {
+          dataSend.chardata[0] = 'a';
+          dataSend.chardata[1] = angle/10 + 0x30;
+          dataSend.chardata[2] = angle%10 + 0x30;
+          dataSend.chardata[3] = 0;
+          ETout.sendData();
+        }
+      }
+      updateMenu();
+      joystickupheld = 1;
+    }
+    else if(joystickupheld == 1)
+    {
+      dataSend.chardata[0] = 'a';
+      dataSend.chardata[1] = angle/10 + 0x30;
+      dataSend.chardata[2] = angle%10 + 0x30;
+      dataSend.chardata[3] = 0;
+      ETout.sendData();
+      joystickupheld =0;
+    }
+    if(!digitalRead(ADW))
+    {
+      if(angle > MIN_ANGLE)
+      {
+        angle--;
+        if(angle%1 == 0)
+        {
+          dataSend.chardata[0] = 'a';
+          dataSend.chardata[1] = angle/10 + 0x30;
+          dataSend.chardata[2] = angle%10 + 0x30;
+          dataSend.chardata[3] = 0;
+          ETout.sendData();
+        }
+      }
+      updateMenu();
+      joystickdwheld = 1;
+    }
+    else if(joystickdwheld == 1)
+    {
+      dataSend.chardata[0] = 'a';
+      dataSend.chardata[1] = angle/10 + 0x30;
+      dataSend.chardata[2] = angle%10 + 0x30;
+      dataSend.chardata[3] = 0;
+      ETout.sendData();
+      joystickdwheld =0;
+    }
+    if(!digitalRead(PUP) && !puheld)
+    {
+      puheld = 1;
+      sendCommand("puh");
+    }
+    if(digitalRead(PUP) && puheld)
+    {
+      puheld = 0;
+      sendCommand("pur");
+    }
+    if(!digitalRead(PDW) && !pdheld)
+    {
+      pdheld = 1;
+      sendCommand("pdh");
+    }
+    if(digitalRead(PDW) && pdheld)
+    {
+      pdheld = 0;
+      sendCommand("pdr");
+    }  
+  }
+  
 }
 // It's the deboun-cing functionw that are called during interrupt. It simply buffers up the interrupts only allowing once interrupt every debouncing_time milisec
 // It calls the actual Interrupt service routine only after the debouncing.
@@ -237,7 +239,7 @@ void arm()
 
 void fire()
 {	
-  if(!safe && !fired && digitalRead(DRV))
+  if(!safe && !fired)
   {
     fired = 1;
      sendCommand("f20");
@@ -345,9 +347,9 @@ void handleCommand(char* command)
           }
           if(command[2] == '2');
           {
-            if(!digitalRead(RJU))
+            if(!digitalRead(PUP))
                sendCommand("puh");
-            if(!digitalRead(RJD))
+            if(!digitalRead(PDW))
               sendCommand("pdh");
             ignoreFlag = 0;
             lcd.clear();
