@@ -14,8 +14,8 @@ struct SEND_DATA_STRUCTURE{
     char chardata[4];
 };
 
-SEND_DATA_STRUCTURE dataReceive;
-RECEIVE_DATA_STRUCTURE dataSend;
+SEND_DATA_STRUCTURE dataSend;
+RECEIVE_DATA_STRUCTURE dataReceive;
 
   // Actuator related pins
 #define aFF2 6
@@ -32,6 +32,10 @@ RECEIVE_DATA_STRUCTURE dataSend;
   // Sensor pins
 #define pressureSen A9
 #define proxSen A0
+
+//Motor Controller Pins
+#define LMR 13
+#define RMR 12
 
   // Angle constants
 const int MIN_ANGLE = 10;
@@ -52,6 +56,15 @@ bool safe;
 bool previousSafe;
 bool isNoPower;
 
+bool newdata;
+int bufferreset;
+int ccwbuff;
+int cwbuff;
+int accelerator_ff;
+int ccw; //190 min  30% = 206
+int cw; // 184 min 30% = 155
+char lastcommand[4];
+
 
 void setup(){
     pinMode(aFF2, INPUT);      
@@ -66,16 +79,24 @@ void setup(){
     pinMode(proxSen, INPUT);
   
     Serial.begin(9600);
-    Serial1.begin(9600);
-    ETin.begin(details(dataReceive), &Serial1);                      // Using Serial 1 for easy transfer
-    ETout.begin(details(dataSend), &Serial1);
+    Serial2.begin(9600);
+    ETin.begin(details(dataReceive), &Serial2);                      // Using Serial 1 for easy transfer
+    ETout.begin(details(dataSend), &Serial2);
     
     aDirection = 0;                                                   // Initialize actactor direction to 0 (retract)
     armed = false;                                                    // Initialize arm flag
     isNoPower = false;                                                // Initialize power flag
     previousSafe = true;                                              // Initialize safe flag
     set_angle = false;                                                // Initialize set_angle flag
-  
+
+    newdata = false;                                                  //Driving Initialization
+    bufferreset = 0;
+    ccwbuff = 1870;
+    cwbuff = 1870;
+    accelerator_ff = 0;
+    ccw = 187;
+    cw = 187;
+    
       // Relay initialization
     digitalWrite(fireRelay, 1);                                       // Turn off all relays except the blow off
     digitalWrite(inflatorRelay, 1);
@@ -122,7 +143,7 @@ void loop(){
         while(getPsi() > 45.0);
         digitalWrite(blowoffRelay, 0);
     }
-    safe = (getProximitySensorReading() < 50.0);                              // Check the proximity sensor
+    safe = true;//(getProximitySensorReading() < 50.0);                              // Check the proximity sensor
     
     if(!safe && previousSafe){                                         // Safe -> Not safe: Send signal to control box and turn off inflator
         sendCommand("f01");
@@ -138,7 +159,7 @@ void loop(){
 ISR(TIMER1_COMPA_vect){
     Serial.println("ANGLE: " + String(angle));                        // Display values to serial monitor
     Serial.println("PRESSURE: " + String(getPsi()));
-    Serial.println("PROXIMITY: " + String(getProximitySensorReading()));
+//    Serial.println("PROXIMITY: " + String(getProximitySensorReading()));
     Serial.println();
     
     if(previousSafe){                                                  // Continually send pressure value to control box if it is under safe mode
@@ -178,7 +199,38 @@ void serialProcess(){
                     digitalWrite(blowoffRelay, 0);
                 }
                 break;
-  
+            case 'd':
+                newdata = true;
+                      // Drive
+                if(lastcommand[1] != dataReceive.chardata[1] || lastcommand[2] != dataReceive.chardata[2]){ //decelerate
+                  cw = 187;
+                  ccw = 187;
+                  analogWrite(LMR, cw);
+                  analogWrite(RMR, ccw);
+                  cwbuff = 1870;
+                  ccwbuff = 1870;
+                  delay(400);
+                }
+                else{     //accelerate
+                  if(accelerator_ff >4){
+                    if(cwbuff > 1581){
+                      cwbuff -= 17;
+                      cw = cwbuff%10 > 0 ? cwbuff/10 + 1 : cwbuff/10;
+                    }
+                    if(ccwbuff < 2180){
+                      ccwbuff += 10;
+                      ccw = ccwbuff/10;
+                    }
+                    bufferreset = 0;
+                    accelerator_ff = 0;
+                    writetomotors(dataReceive.chardata);
+                  }
+                  else{
+                    accelerator_ff++;
+                  }
+                }
+     
+                break;
               // Fire code
             case 'f':
                 if(dataReceive.chardata[1] == '3' && dataReceive.chardata[2] == '0'){
@@ -200,6 +252,42 @@ void serialProcess(){
         }
         
     }
+     else if(lastcommand[0] == 'd'){
+               if (newdata){bufferreset++;}
+               if (bufferreset > 30000){
+                cw = 187;
+                ccw = 187;
+                analogWrite(LMR, cw);
+                analogWrite(RMR, ccw);
+                cwbuff = 1870;
+                ccwbuff = 1870;
+                bufferreset = 0;
+                newdata = false;
+               }
+     }
+     lastcommand[0] = dataReceive.chardata[0];
+     lastcommand[1] = dataReceive.chardata[1];
+     lastcommand[2] = dataReceive.chardata[2];
+     lastcommand[3] = dataReceive.chardata[3];
+}
+
+void writetomotors(char data[4]){
+  if(data[1] == 'f' & data[2] == 'n'){
+            analogWrite(LMR, ccw);
+            analogWrite(RMR, ccw);
+        }
+        else if(data[1] == 'f' & data[2] == 'l'){
+           analogWrite(LMR, (ccw-187)/2 +187);
+           analogWrite(RMR, ccw);
+        }
+        else if(data[1] == 'f' & data[2] == 'r'){
+           analogWrite(LMR, ccw);
+           analogWrite(RMR, (ccw-187)/2+187);
+        }
+        else if(data[1] == 'r'){
+          analogWrite(LMR, cw);
+          analogWrite(RMR, cw);
+        }
 }
 
   
@@ -207,13 +295,14 @@ void angleOperation(){
     int requiredReading = angleToReading(angle);
     int reading = analogRead(aPOS);
     if(abs(reading - requiredReading) > 1){                                        // If not yet reach the target angle, activate the actuator
-        aDirection = (reading - requiredReading) < 0 ? 1 : 0;                      // in the direction toward the target
+        aDirection = (reading - requiredReading) < 0 ? 0 : 1;                      // in the direction toward the target
         digitalWrite(aDIR, aDirection);
         analogWrite(aPWM, 100);
     } else {
         analogWrite(aPWM, 0);                                                     // If reach target, stop actuator and reset set_angle flag
         set_angle = false;
     }
+    Serial.println(String(analogRead(aPWM)));
 }
 
 
@@ -249,15 +338,15 @@ double getPsi(){
     return (reading - MIN_PSI_READING) * PSI_INTERVAL / PSI_READING_INTERVAL;
 }
 
-
+/*
 double getProximitySensorReading(){
     double reading = 0;                                                           // Get 100 readings from the sensors and take the average as the final reading
     for(int i = 0; i < 100; i++){
         reading += analogRead(proxSen);
     }
-    return reading /= 100.0;
+    return reading /= 100.0; 
 }
-
+*/
 
 void sendCommand(String command){                                                 // Send 4-character command to control box using easy transfer
     if(command[0] == 'p' && command.length() < 3){
@@ -272,6 +361,9 @@ void sendCommand(String command){                                               
         dataSend.chardata[3] = 0;
     }
     ETout.sendData();
+    Serial.println(dataSend.chardata);
 }
+
+
 
 

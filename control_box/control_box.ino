@@ -23,12 +23,13 @@ RECEIVE_DATA_STRUCTURE dataReceive;
 #define D7  30
 #define LL  50  // LCD Backlight pin
 #define BL  51  // Button Light pin 
-#define AUP  25	// Angle up pin. Left joystick
-#define ADW  23	// Angle down pin. Left joystick
-#define PUP	 29	// Pressure up pin. Right joystick
-#define PDW	 27	// Pressure down pin. Right joystick
+#define RJU  25	// Angle up pin. Ri+ght joystick
+#define RJD  23	// Angle down pin. Right joystick
+#define LJU	 29	// Pressure up pin. Left joystick
+#define LJD	 27	// Pressure down pin. Left joystick
 #define ARM  2	// Arm/Disarm toggle switch pin
 #define FIR  3	// Fire pin. BIG RED BUTTON
+#define DRV  10 // Drive pin.
 
 #define MAX_ANGLE 80
 #define MIN_ANGLE 10
@@ -42,7 +43,7 @@ int joystickupheld = 0;     // Angle up held flag.
 int joystickdwheld = 0;     // Angle down held flag.
 int fired = 0;              // flag that gets set when you press the fire button. It's so that you can't fire twice without disarming the cannon first.
 int ignoreFlag = 0;					// flag is set if the cannon is locked. Ignore all interrupt input.
-int CannonReadyFlag = 0;			// Is the Cannon ready to accept commands
+int CannonReadyFlag = 1;			// Is the Cannon ready to accept commands
 int safe = 1;						// mode of the cannon for now only 1 or 0
 int angle = -1;						// cannon angle. Initialized to -1 so it doesn't display at the start.
 int pressure = -1;					// cannon pressure. Same as above.
@@ -64,23 +65,19 @@ void setup()
   digitalWrite(BL, HIGH);
   lcd.begin(20, 4);                               // 20, 4 is our lcd size
 	displayMenu();														      // Initialize the lcd to display the Menu without values
-	pinMode(AUP, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic. 
-	pinMode(ADW, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
-	pinMode(PUP, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
-	pinMode(PDW, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
+	pinMode(LJU, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic. 
+	pinMode(LJD, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
+	pinMode(RJU, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
+	pinMode(RJD, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
 	pinMode(ARM, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
 	pinMode(FIR, INPUT_PULLUP);											// Making the interrupt pin INPUT_PULLUP makes it less sensitive to noise, but switches the logic.
+  pinMode(DRV, INPUT_PULLUP);                     // ""                                                                                             ""
 	Serial.begin(9600);
   Serial2.begin(9600);                            // Direct EasyTransfer UART
   Serial3.begin(9600);                            // BLIP RS232 UART. Currently not used. I'll leave the code for it here for now.
   ETout.begin(details(dataSend), &Serial2);
   ETin.begin(details(dataReceive), &Serial2);
-  dataSend.chardata[0] = 'f';
-  dataSend.chardata[1] = '3';
-  dataSend.chardata[2] = '0';
-  dataSend.chardata[3] = 0;
-  ETout.sendData();
-  Serial3.print(dataSend.chardata);
+  sendCommand("f30");
 }
 
 void loop() 
@@ -104,22 +101,10 @@ void loop()
   }
 
   if(ETin.receiveData())
+  {
     handleCommand(dataReceive.chardata);
-}
-
-void serial3Event()
-{
-  char buf[128] = "";          // Set up a small buffer for readBytes
-  
-  if(Serial3.available() < 4)
-    return;                    // do nothing until we have 4 characters(1 command)
-
-  Serial3.readBytes(buf, 4);     // Read the command
-
-  Serial.print(buf);
-  
-  handleCommand(buf);           
-  
+//    Serial.print(dataReceive.chardata);
+  }
 }
 
 ISR(TIMER1_COMPA_vect)          // timer compare interrupt service routine
@@ -135,8 +120,9 @@ ISR(TIMER1_COMPA_vect)          // timer compare interrupt service routine
     arm();
   if(!safe)
     return;
-  if(!digitalRead(AUP))
+  if(!digitalRead(RJU))
   {
+    Serial.println("RJU");
     if(angle < MAX_ANGLE)
     {
       angle++;
@@ -147,7 +133,6 @@ ISR(TIMER1_COMPA_vect)          // timer compare interrupt service routine
         dataSend.chardata[2] = angle%10 + 0x30;
         dataSend.chardata[3] = 0;
         ETout.sendData();
-        Serial3.print(dataSend.chardata);
       }
     }
     updateMenu();
@@ -160,10 +145,9 @@ ISR(TIMER1_COMPA_vect)          // timer compare interrupt service routine
     dataSend.chardata[2] = angle%10 + 0x30;
     dataSend.chardata[3] = 0;
     ETout.sendData();
-    Serial3.print(dataSend.chardata);
     joystickupheld =0;
   }
-  if(!digitalRead(ADW))
+  if(!digitalRead(RJD))
   {
     if(angle > MIN_ANGLE)
     {
@@ -175,7 +159,6 @@ ISR(TIMER1_COMPA_vect)          // timer compare interrupt service routine
         dataSend.chardata[2] = angle%10 + 0x30;
         dataSend.chardata[3] = 0;
         ETout.sendData();
-        Serial3.print(dataSend.chardata);
       }
     }
     updateMenu();
@@ -188,28 +171,42 @@ ISR(TIMER1_COMPA_vect)          // timer compare interrupt service routine
     dataSend.chardata[2] = angle%10 + 0x30;
     dataSend.chardata[3] = 0;
     ETout.sendData();
-    Serial3.print(dataSend.chardata);
     joystickdwheld =0;
   }
-  if(!digitalRead(PUP) && !puheld)
+  if(!digitalRead(LJU) && !puheld && digitalRead(DRV))
   {
     puheld = 1;
     sendCommand("puh");
   }
-  if(digitalRead(PUP) && puheld)
+  if(digitalRead(LJU) && puheld && digitalRead(DRV))
   {
     puheld = 0;
     sendCommand("pur");
   }
-  if(!digitalRead(PDW) && !pdheld)
+  if(!digitalRead(LJD) && !pdheld && digitalRead(DRV))
   {
     pdheld = 1;
     sendCommand("pdh");
   }
-  if(digitalRead(PDW) && pdheld)
+  if(digitalRead(LJD) && pdheld && digitalRead(DRV))
   {
     pdheld = 0;
     sendCommand("pdr");
+  }
+  //Driving Code
+  if(!digitalRead(DRV)){
+     if(!digitalRead(LJU) & !digitalRead(RJU)){      //Drive Forward
+      sendCommand("dfn");
+     }
+     if(!digitalRead(LJD) & !digitalRead(RJD)){      //Drive Backward
+      sendCommand("drn");
+     }
+     if(!digitalRead(LJU) & !digitalRead(RJD)){      //Drive Right
+      sendCommand("dfr");
+     }
+     if(!digitalRead(LJD) & !digitalRead(RJU)){      //Drive Left
+      sendCommand("dfl");
+    }
   }
 }
 // It's the deboun-cing functionw that are called during interrupt. It simply buffers up the interrupts only allowing once interrupt every debouncing_time milisec
@@ -240,7 +237,7 @@ void arm()
 
 void fire()
 {	
-  if(!safe && !fired)
+  if(!safe && !fired && digitalRead(DRV))
   {
     fired = 1;
      sendCommand("f20");
@@ -250,14 +247,14 @@ void fire()
 void displayMenu()
 {
 	lcd.clear();
-	lcd.setCursor(0, 1);			// Sets the lcd cursor to 1st line beggining
-	lcd.print("deg");
-	lcd.setCursor(8, 1);			// 2nd line beginning and etc.
-	lcd.print("PSI");
-	lcd.setCursor(16, 1);
-	lcd.print("m/s");
-//	lcd.setCursor(0, 3);
-//	lcd.print("Speed:");
+  lcd.setCursor(0, 0);      // Sets the lcd cursor to 1st line beggining
+  lcd.print("Cannon state:");
+  lcd.setCursor(0, 1);      // 2nd line beginning and etc.
+  lcd.print("Angle:");
+  lcd.setCursor(0, 2);
+  lcd.print("Pressure:");
+  lcd.setCursor(0, 3);
+  lcd.print("Speed:");
 }
 
 // The X values for setCursor were made so the values will be outputted at the end of each row without overflowwing into the next line. It assumes only 2 decimal values.
@@ -266,26 +263,29 @@ void updateMenu()
 {
   if(nopow)
     return;
+  lcd.setCursor(15, 0);
+  lcd.print(String((safe)?" SAFE":"ARMED"));      //Depending on the state variable choose between the 2 strings around the : character
+
 	if(angle >= 0)
 	{
-		lcd.setCursor(0, 0);
-		lcd.print(String(angle));              	//decmal value 223 is the value for the degree sign for the J204A degree character.
+    lcd.setCursor(17, 1);
+    lcd.print(String(angle) + char(223));               //decmal value 223 is the value for the degree sign for the J204A degree character.
 	}
   if(pressure >= 0)
   {
-    lcd.setCursor(9, 0);
-	  lcd.print(String(pressure/10) + String(pressure%10));
+    lcd.setCursor(14, 2);
+	  lcd.print(String(pressure/10) + String(pressure%10) + " PSI");
     if(pressure < 5)
     {
-      lcd.setCursor(15, 0);
-      lcd.print(" N/A ");
+      lcd.setCursor(16, 3);
+      lcd.print(" N/A");
     }
     else
     {
       float velocity = 0.3182*pressure + 1.0126;
       velocity = round(velocity*10.0)/10.0;
-      lcd.setCursor(15, 0);
-      lcd.print(String(velocity));
+      lcd.setCursor(12, 3);
+      lcd.print(String(velocity) + " m/s");
     }
   }
 }
@@ -297,9 +297,8 @@ void sendCommand(char* command)
    dataSend.chardata[2] = command[2];
    dataSend.chardata[3] = 0;
    ETout.sendData();
-   Serial3.print(dataSend.chardata);
 
-   Serial.print(dataSend.chardata);
+   Serial.println(command);
 }
 
 void handleCommand(char* command)
@@ -346,9 +345,9 @@ void handleCommand(char* command)
           }
           if(command[2] == '2');
           {
-            if(!digitalRead(PUP))
+            if(!digitalRead(RJU))
                sendCommand("puh");
-            if(!digitalRead(PDW))
+            if(!digitalRead(RJD))
               sendCommand("pdh");
             ignoreFlag = 0;
             lcd.clear();
